@@ -1,0 +1,1 @@
+print("Checking push based mirroring")
