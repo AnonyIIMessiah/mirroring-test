@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# --- Assume only one push mirror target
+# Push mirroring remotes are named `remote_mirror_<id>`.
+# This line finds the first remote and uses that.
+TARGET_REPO=$(git remote | grep -m 1 remote_mirror)
+
+proxy_push()
+{
+  # --- Arguments
+  OLDREV=$(git rev-parse $1)
+  NEWREV=$(git rev-parse $2)
+  REFNAME="$3"
+
+  # --- Pattern of branches to proxy pushes
+  allowlist=$(expr "$branch" : "\(main\)")
+
+  case "$refname" in
+    refs/heads/*)
+      branch=$(expr "$refname" : "refs/heads/\(.*\)")
+
+      if [ "$allowlist" = "$branch" ]; then
+        # handle https://git-scm.com/docs/git-receive-pack#_quarantine_environment
+        unset GIT_QUARANTINE_PATH
+        error="$(git push --quiet $TARGET_REPO $NEWREV:$REFNAME 2>&1)"
+        fail=$?
+
+        if [ "$fail" != "0" ]; then
+          echo >&2 ""
+          echo >&2 " Error: updates were rejected by upstream server"
+          echo >&2 "   This is usually caused by another repository pushing changes"
+          echo >&2 "   to the same ref. You may want to first integrate remote changes"
+          echo >&2 ""
+          return
+        fi
+      fi
+      ;;
+  esac
+}
+
+# Allow dual mode: run from the command line just like the update hook, or
+# if no arguments are given, then run as a hook script:
+if [ -n "$1" -a -n "$2" -a -n "$3" ]; then
+  # Output to the terminal in command line mode. If someone wanted to
+  # resend an email, they could redirect the output to sendmail themselves
+  PAGER= proxy_push $2 $3 $1
+else
+  # Push is proxied upstream one ref at a time. It is possible for some refs
+  # to succeed, and others to fail. This results in a failed push.
+  while read oldrev newrev refname
+  do
+    proxy_push $oldrev $newrev $refname
+  done
+fi
